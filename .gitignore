@@ -1,0 +1,13 @@
+# Datos personales - NO subir a GitHub
+datos_app.json
+
+# Archivos de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos de VS Code
+.vscode/
+
+# Entorno virtual
+.venv/
