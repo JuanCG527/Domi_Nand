@@ -1,5 +1,5 @@
 # =============================================================================
-# DOMINAN PRO - Versión SQLite + Mobile First
+# DOMINAN PRO - Versión SQLite + Mobile First (Navegación Corregida)
 # =============================================================================
 
 import streamlit as st
@@ -40,13 +40,11 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    
     c.execute("""CREATE TABLE IF NOT EXISTS zonas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT UNIQUE NOT NULL,
         precio_base INTEGER NOT NULL DEFAULT 7000
     )""")
-    
     c.execute("""CREATE TABLE IF NOT EXISTS lugares (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT UNIQUE NOT NULL,
@@ -55,14 +53,12 @@ def init_db():
         ultima_visita TEXT,
         FOREIGN KEY (zona_id) REFERENCES zonas(id) ON DELETE SET NULL
     )""")
-    
     c.execute("""CREATE TABLE IF NOT EXISTS direcciones_lugares (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lugar_id INTEGER NOT NULL,
         direccion TEXT NOT NULL,
         FOREIGN KEY (lugar_id) REFERENCES lugares(id) ON DELETE CASCADE
     )""")
-    
     c.execute("""CREATE TABLE IF NOT EXISTS domicilios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lugar_id INTEGER,
@@ -74,19 +70,16 @@ def init_db():
         FOREIGN KEY (lugar_id) REFERENCES lugares(id) ON DELETE SET NULL,
         FOREIGN KEY (zona_id) REFERENCES zonas(id) ON DELETE SET NULL
     )""")
-    
     c.execute("""CREATE TABLE IF NOT EXISTS gastos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         concepto TEXT NOT NULL,
         valor INTEGER NOT NULL DEFAULT 0,
         fecha TEXT NOT NULL
     )""")
-    
     c.execute("SELECT COUNT(*) as count FROM zonas")
     if c.fetchone()["count"] == 0:
         c.executemany("INSERT INTO zonas (nombre, precio_base) VALUES (?, ?)",
             [("Zona Norte", 7000), ("Zona Sur", 7500), ("Zona Centro", 6000)])
-    
     conn.commit()
     conn.close()
 
@@ -289,27 +282,40 @@ def get_top_lugares(limit=10):
     return lugares
 
 # =============================================================================
-# NAVEGACIÓN PRINCIPAL
+# NAVEGACIÓN CON SESSION_STATE (CORREGIDA)
 # =============================================================================
+if "vista_principal" not in st.session_state:
+    st.session_state.vista_principal = "nuevo"
+if "vista_mas" not in st.session_state:
+    st.session_state.vista_mas = "menu"
+
 st.title("🏍️ DomiNan Pro")
 
 nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
 
 with nav_col1:
-    btn_domicilio = st.button("📝\nNuevo", use_container_width=True, type="primary")
+    if st.button("📝\nNuevo", use_container_width=True, type="primary" if st.session_state.vista_principal == "nuevo" else "secondary"):
+        st.session_state.vista_principal = "nuevo"
+        st.rerun()
 with nav_col2:
-    btn_historial = st.button("📋\nHistorial", use_container_width=True)
+    if st.button("📋\nHistorial", use_container_width=True, type="primary" if st.session_state.vista_principal == "historial" else "secondary"):
+        st.session_state.vista_principal = "historial"
+        st.rerun()
 with nav_col3:
-    btn_gastos = st.button("💸\nGastos", use_container_width=True)
+    if st.button("💸\nGastos", use_container_width=True, type="primary" if st.session_state.vista_principal == "gastos" else "secondary"):
+        st.session_state.vista_principal = "gastos"
+        st.rerun()
 with nav_col4:
-    btn_mas = st.button("⚙️\nMás", use_container_width=True)
+    if st.button("⚙️\nMás", use_container_width=True, type="primary" if st.session_state.vista_principal == "mas" else "secondary"):
+        st.session_state.vista_principal = "mas"
+        st.rerun()
 
 st.markdown("---")
 
 # =============================================================================
 # VISTA: NUEVO DOMICILIO
 # =============================================================================
-if btn_domicilio or not any([btn_historial, btn_gastos, btn_mas]):
+if st.session_state.vista_principal == "nuevo":
     doms_hoy = get_domicilios_hoy()
     gastos_hoy_list = get_gastos_hoy()
     total_ingresos = sum(d["valor"] + d["propina"] for d in doms_hoy)
@@ -376,7 +382,6 @@ if btn_domicilio or not any([btn_historial, btn_gastos, btn_mas]):
             precio_sugerido = next((z["precio_base"] for z in zonas if z["nombre"] == zona_seleccionada_nombre), precio_sugerido)
         
         st.info(f"📅 **{obtener_fecha_hoy()}** | 🕒 **{obtener_hora_actual()}**")
-        
         valor_final = st.number_input("💵 Valor del domicilio:", min_value=0, step=500, value=precio_sugerido)
         
         st.markdown("🎁 **Propina:**")
@@ -397,7 +402,6 @@ if btn_domicilio or not any([btn_historial, btn_gastos, btn_mas]):
         propina = st.number_input("💵 Valor de propina:", min_value=0, step=500, value=st.session_state.propina_calc)
         total = valor_final + propina
         st.success(f"**💰 Total: {formatear_moneda(total)}**")
-        
         guardar = st.form_submit_button("💾 GUARDAR DOMICILIO", type="primary", use_container_width=True)
     
     if guardar:
@@ -433,10 +437,9 @@ if btn_domicilio or not any([btn_historial, btn_gastos, btn_mas]):
 # =============================================================================
 # VISTA: HISTORIAL
 # =============================================================================
-elif btn_historial:
+elif st.session_state.vista_principal == "historial":
     st.subheader("📋 Historial de Domicilios")
     busqueda_hist = st.text_input("🔍 Buscar:", placeholder="Lugar o dirección...", key="busqueda_hist")
-    
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         fecha_inicio = st.date_input("📅 Desde:", value=datetime.now() - timedelta(days=30), key="fecha_ini_hist")
@@ -470,22 +473,19 @@ elif btn_historial:
 # =============================================================================
 # VISTA: GASTOS
 # =============================================================================
-elif btn_gastos:
+elif st.session_state.vista_principal == "gastos":
     st.subheader("💸 Registrar Gasto")
-    
     GASTOS_FRECUENTES = {
         "Gasolina": 15000, "Almuerzo": 12000, "Cena": 10000,
         "Mantenimiento moto": 25000, "Carga celular": 3000,
         "Agua/Refresco": 2000, "Parqueadero": 3000, "Peaje": 5000, "Otro": 0
     }
-    
     with st.form("form_gasto", clear_on_submit=True):
         concepto = st.selectbox("📋 Concepto:", options=list(GASTOS_FRECUENTES.keys()))
         if concepto == "Otro":
             concepto_final = st.text_input("Describe el gasto:")
         else:
             concepto_final = concepto
-        
         valor_sugerido = GASTOS_FRECUENTES[concepto]
         valor_gasto = st.number_input("💵 Valor:", min_value=0, step=500, value=valor_sugerido if valor_sugerido > 0 else 0)
         st.info(f"📅 **{obtener_fecha_hoy()}** | 🕒 **{obtener_hora_actual()}**")
@@ -514,13 +514,10 @@ elif btn_gastos:
                 st.rerun()
 
 # =============================================================================
-# VISTA: MÁS (con session_state para recordar la selección)
+# VISTA: MÁS
 # =============================================================================
-elif btn_mas:
+elif st.session_state.vista_principal == "mas":
     st.subheader("⚙️ Más Opciones")
-    
-    if "vista_mas" not in st.session_state:
-        st.session_state.vista_mas = "menu"
     
     col_nav1, col_nav2, col_nav3 = st.columns(3)
     with col_nav1:
@@ -560,7 +557,6 @@ elif btn_mas:
                         st.rerun()
                     else:
                         st.error("⚠️ Esa zona ya existe.")
-        
         st.markdown("---")
         st.markdown("**Zonas registradas:**")
         zonas = get_zonas()
@@ -584,7 +580,6 @@ elif btn_mas:
     elif st.session_state.vista_mas == "lugares":
         st.markdown("### 📍 Lugares de Entrega")
         zonas = get_zonas()
-        
         with st.form("form_nuevo_lugar"):
             nombre_lugar = st.text_input("Nombre del lugar:")
             zona_lugar = st.selectbox("Zona:", options=[z["nombre"] for z in zonas])
@@ -597,7 +592,6 @@ elif btn_mas:
                         st.rerun()
                     else:
                         st.error("⚠️ Ese lugar ya existe.")
-        
         st.markdown("---")
         st.markdown("**Lugares registrados:**")
         lugares = get_lugares()
@@ -616,14 +610,12 @@ elif btn_mas:
                         if col_dir2.button("🗑️", key=f"del_dir_{dir_obj['id']}"):
                             eliminar_direccion_lugar(dir_obj["id"])
                             st.rerun()
-                    
                     nueva_dir = st.text_input("Nueva dirección", key=f"add_dir_{lugar['id']}", placeholder="Ej: Carrera 10 #5-20")
                     if st.button("➕ Agregar dirección", key=f"btn_add_{lugar['id']}", use_container_width=True):
                         if nueva_dir.strip():
                             agregar_direccion_lugar(lugar["id"], nueva_dir)
                             st.success("Dirección agregada.")
                             st.rerun()
-                    
                     zonas_list = [z["nombre"] for z in zonas]
                     index_zona_actual = 0
                     if lugar["zona_nombre"] and lugar["zona_nombre"] in zonas_list:
@@ -634,7 +626,6 @@ elif btn_mas:
                         actualizar_zona_lugar(lugar["id"], zona_id)
                         st.success("Zona actualizada.")
                         st.rerun()
-                    
                     if st.button("🗑️ Eliminar lugar", key=f"del_lugar_{lugar['id']}", use_container_width=True):
                         eliminar_lugar(lugar["id"])
                         st.rerun()
