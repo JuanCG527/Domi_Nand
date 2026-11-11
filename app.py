@@ -1,5 +1,5 @@
 # =============================================================================
-# DOMINAN PRO - Versión SQLite + Mobile First (Navegación Corregida)
+# DOMINAN PRO - Versión CRM con Tarjetas de Clientes
 # =============================================================================
 
 import streamlit as st
@@ -23,6 +23,12 @@ st.markdown("""
     h1 { font-size: 1.8rem; }
     h2 { font-size: 1.4rem; }
     h3 { font-size: 1.2rem; }
+    .cliente-card {
+        background: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -40,25 +46,31 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
+    
     c.execute("""CREATE TABLE IF NOT EXISTS zonas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT UNIQUE NOT NULL,
         precio_base INTEGER NOT NULL DEFAULT 7000
     )""")
+    
     c.execute("""CREATE TABLE IF NOT EXISTS lugares (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT UNIQUE NOT NULL,
         zona_id INTEGER,
+        telefono TEXT,
+        comentarios TEXT,
         visitas INTEGER DEFAULT 0,
         ultima_visita TEXT,
         FOREIGN KEY (zona_id) REFERENCES zonas(id) ON DELETE SET NULL
     )""")
+    
     c.execute("""CREATE TABLE IF NOT EXISTS direcciones_lugares (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lugar_id INTEGER NOT NULL,
         direccion TEXT NOT NULL,
         FOREIGN KEY (lugar_id) REFERENCES lugares(id) ON DELETE CASCADE
     )""")
+    
     c.execute("""CREATE TABLE IF NOT EXISTS domicilios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lugar_id INTEGER,
@@ -70,16 +82,30 @@ def init_db():
         FOREIGN KEY (lugar_id) REFERENCES lugares(id) ON DELETE SET NULL,
         FOREIGN KEY (zona_id) REFERENCES zonas(id) ON DELETE SET NULL
     )""")
+    
     c.execute("""CREATE TABLE IF NOT EXISTS gastos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         concepto TEXT NOT NULL,
         valor INTEGER NOT NULL DEFAULT 0,
         fecha TEXT NOT NULL
     )""")
+    
+    # Migración: agregar columnas telefono y comentarios si no existen
+    try:
+        c.execute("ALTER TABLE lugares ADD COLUMN telefono TEXT")
+    except:
+        pass  # Ya existe
+    
+    try:
+        c.execute("ALTER TABLE lugares ADD COLUMN comentarios TEXT")
+    except:
+        pass  # Ya existe
+    
     c.execute("SELECT COUNT(*) as count FROM zonas")
     if c.fetchone()["count"] == 0:
         c.executemany("INSERT INTO zonas (nombre, precio_base) VALUES (?, ?)",
             [("Zona Norte", 7000), ("Zona Sur", 7500), ("Zona Centro", 6000)])
+    
     conn.commit()
     conn.close()
 
@@ -90,6 +116,11 @@ init_db()
 # =============================================================================
 def formatear_moneda(valor):
     return f"${int(valor):,}"
+
+def formatear_telefono(telefono):
+    if telefono:
+        return f"📞 {telefono}"
+    return ""
 
 def obtener_fecha_hoy():
     return datetime.now().strftime("%Y-%m-%d")
@@ -114,8 +145,9 @@ def get_lugares(busqueda=""):
     if busqueda:
         query = """SELECT l.*, z.nombre as zona_nombre, z.precio_base
             FROM lugares l LEFT JOIN zonas z ON l.zona_id = z.id
-            WHERE l.nombre LIKE ? ORDER BY l.visitas DESC"""
-        lugares = conn.execute(query, (f"%{busqueda}%",)).fetchall()
+            WHERE l.nombre LIKE ? OR l.telefono LIKE ? OR l.comentarios LIKE ?
+            ORDER BY l.visitas DESC"""
+        lugares = conn.execute(query, (f"%{busqueda}%", f"%{busqueda}%", f"%{busqueda}%")).fetchall()
     else:
         query = """SELECT l.*, z.nombre as zona_nombre, z.precio_base
             FROM lugares l LEFT JOIN zonas z ON l.zona_id = z.id
@@ -123,6 +155,14 @@ def get_lugares(busqueda=""):
         lugares = conn.execute(query).fetchall()
     conn.close()
     return lugares
+
+def get_lugar_por_id(lugar_id):
+    conn = get_db()
+    lugar = conn.execute("""SELECT l.*, z.nombre as zona_nombre, z.precio_base
+        FROM lugares l LEFT JOIN zonas z ON l.zona_id = z.id
+        WHERE l.id = ?""", (lugar_id,)).fetchone()
+    conn.close()
+    return lugar
 
 def get_direcciones_lugar(lugar_id):
     conn = get_db()
@@ -206,10 +246,11 @@ def actualizar_precio_zona(zona_id, nuevo_precio):
     conn.commit()
     conn.close()
 
-def insertar_lugar(nombre, zona_id, direccion):
+def insertar_lugar(nombre, zona_id, direccion, telefono="", comentarios=""):
     conn = get_db()
     try:
-        cursor = conn.execute("INSERT INTO lugares (nombre, zona_id) VALUES (?, ?)", (nombre, zona_id))
+        cursor = conn.execute("INSERT INTO lugares (nombre, zona_id, telefono, comentarios) VALUES (?, ?, ?, ?)", 
+            (nombre, zona_id, telefono, comentarios))
         lugar_id = cursor.lastrowid
         conn.execute("INSERT INTO direcciones_lugares (lugar_id, direccion) VALUES (?, ?)", (lugar_id, direccion))
         conn.commit()
@@ -218,6 +259,13 @@ def insertar_lugar(nombre, zona_id, direccion):
     except sqlite3.IntegrityError:
         conn.close()
         return False
+
+def actualizar_lugar_info(lugar_id, telefono, comentarios):
+    conn = get_db()
+    conn.execute("UPDATE lugares SET telefono = ?, comentarios = ? WHERE id = ?", 
+        (telefono, comentarios, lugar_id))
+    conn.commit()
+    conn.close()
 
 def agregar_direccion_lugar(lugar_id, direccion):
     conn = get_db()
@@ -282,7 +330,7 @@ def get_top_lugares(limit=10):
     return lugares
 
 # =============================================================================
-# NAVEGACIÓN CON SESSION_STATE (CORREGIDA)
+# NAVEGACIÓN CON SESSION_STATE
 # =============================================================================
 if "vista_principal" not in st.session_state:
     st.session_state.vista_principal = "nuevo"
@@ -313,7 +361,7 @@ with nav_col4:
 st.markdown("---")
 
 # =============================================================================
-# VISTA: NUEVO DOMICILIO
+# VISTA: NUEVO DOMICILIO CON TARJETAS DE CLIENTES
 # =============================================================================
 if st.session_state.vista_principal == "nuevo":
     doms_hoy = get_domicilios_hoy()
@@ -336,18 +384,55 @@ if st.session_state.vista_principal == "nuevo":
     if "propina_calc" not in st.session_state:
         st.session_state.propina_calc = 0
     
-    busqueda = st.text_input("🔍 Buscar lugar:", placeholder="Escribe el nombre del lugar...", key="buscador_domicilio")
+    # Buscador de lugares (ahora busca también por teléfono y comentarios)
+    busqueda = st.text_input("🔍 Buscar cliente/lugar:", placeholder="Nombre, teléfono o referencia...", key="buscador_domicilio")
     lugares = get_lugares(busqueda)
     
+    # Mostrar tarjetas de clientes filtrados
+    if busqueda and lugares:
+        st.markdown("**👥 Clientes encontrados:**")
+        for lugar in lugares[:5]:  # Mostrar máximo 5
+            with st.container(border=True):
+                col_t1, col_t2 = st.columns([3, 1])
+                col_t1.markdown(f"**{lugar['nombre']}**")
+                col_t1.caption(f"📍 {lugar['zona_nombre'] or 'Sin zona'}")
+                if lugar['telefono']:
+                    col_t1.caption(f"📞 {lugar['telefono']}")
+                col_t1.caption(f"🔄 {lugar['visitas']} visitas")
+                
+                # Botón de selección rápida
+                if col_t2.button("✅ Usar", key=f"usar_{lugar['id']}", use_container_width=True):
+                    st.session_state.lugar_seleccionado_rapido = lugar['nombre']
+                    st.rerun()
+        
+        st.markdown("---")
+    
     with st.form("form_domicilio", clear_on_submit=True):
+        # Selector de lugar
         opciones_lugar = ["➕ Crear nuevo lugar"] + [l["nombre"] for l in lugares]
-        lugar_seleccionado = st.selectbox("📍 Selecciona el lugar:", options=opciones_lugar)
+        
+        # Si hay selección rápida, usarla
+        lugar_seleccionado = st.session_state.get('lugar_seleccionado_rapido', None)
+        if lugar_seleccionado and lugar_seleccionado in opciones_lugar:
+            idx = opciones_lugar.index(lugar_seleccionado)
+        else:
+            idx = 0
+        
+        lugar_seleccionado = st.selectbox("📍 Selecciona el lugar:", options=opciones_lugar, index=idx)
+        
+        # Limpiar selección rápida después de usarla
+        if 'lugar_seleccionado_rapido' in st.session_state:
+            del st.session_state.lugar_seleccionado_rapido
         
         if lugar_seleccionado == "➕ Crear nuevo lugar":
             nombre_nuevo = st.text_input("Nombre del lugar:")
             zonas = get_zonas()
             zona_nueva = st.selectbox("Zona:", options=[z["nombre"] for z in zonas])
             direccion_nueva = st.text_input("Dirección:")
+            telefono_nuevo = st.text_input("📞 Teléfono (opcional):", placeholder="Ej: 3001234567")
+            comentarios_nuevo = st.text_area("📝 Comentarios/Puntos de referencia (opcional):", 
+                placeholder="Ej: Casa azul, portón negro, timbrar 2 veces")
+            
             lugar_final_id = None
             zona_final_id = next((z["id"] for z in zonas if z["nombre"] == zona_nueva), None)
             direccion_final = direccion_nueva
@@ -358,6 +443,26 @@ if st.session_state.vista_principal == "nuevo":
             zona_final_id = lugar_obj["zona_id"] if lugar_obj else None
             precio_sugerido = lugar_obj["precio_base"] if lugar_obj and lugar_obj["precio_base"] else 7000
             
+            # Mostrar tarjeta de información del cliente
+            if lugar_obj:
+                st.markdown("---")
+                st.markdown("**📋 Información del cliente:**")
+                col_info1, col_info2 = st.columns(2)
+                with col_info1:
+                    if lugar_obj['telefono']:
+                        st.info(f"📞 **Teléfono:** {lugar_obj['telefono']}")
+                    st.info(f"🗺️ **Zona:** {lugar_obj['zona_nombre'] or 'Sin zona'}")
+                with col_info2:
+                    st.info(f"🔄 **Visitas:** {lugar_obj['visitas']}")
+                    if lugar_obj['ultima_visita']:
+                        st.info(f"🕒 **Última visita:** {lugar_obj['ultima_visita']}")
+                
+                if lugar_obj['comentarios']:
+                    st.warning(f"📝 **Comentarios:** {lugar_obj['comentarios']}")
+                
+                st.markdown("---")
+            
+            # Direcciones existentes
             direcciones = get_direcciones_lugar(lugar_final_id)
             if direcciones:
                 opciones_dir = [d["direccion"] for d in direcciones] + ["➕ Escribir nueva dirección"]
@@ -369,6 +474,7 @@ if st.session_state.vista_principal == "nuevo":
             else:
                 direccion_final = st.text_input("📍 Dirección:")
             
+            # Selector de zona
             zonas = get_zonas()
             zona_nombre_actual = lugar_obj["zona_nombre"] if lugar_obj else None
             index_zona = 0
@@ -409,7 +515,7 @@ if st.session_state.vista_principal == "nuevo":
             if not nombre_nuevo.strip() or not direccion_nueva.strip():
                 st.error("⚠️ Completa el nombre y dirección.")
             else:
-                if insertar_lugar(nombre_nuevo, zona_final_id, direccion_nueva):
+                if insertar_lugar(nombre_nuevo, zona_final_id, direccion_nueva, telefono_nuevo, comentarios_nuevo):
                     conn = get_db()
                     lugar_creado = conn.execute("SELECT id FROM lugares WHERE nombre = ?", (nombre_nuevo,)).fetchone()
                     conn.close()
@@ -519,17 +625,21 @@ elif st.session_state.vista_principal == "gastos":
 elif st.session_state.vista_principal == "mas":
     st.subheader("⚙️ Más Opciones")
     
-    col_nav1, col_nav2, col_nav3 = st.columns(3)
+    col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
     with col_nav1:
-        if st.button("🗺️ Zonas", use_container_width=True):
-            st.session_state.vista_mas = "zonas"
+        if st.button("👥\nClientes", use_container_width=True, type="primary" if st.session_state.vista_mas == "clientes" else "secondary"):
+            st.session_state.vista_mas = "clientes"
             st.rerun()
     with col_nav2:
-        if st.button("📍 Lugares", use_container_width=True):
-            st.session_state.vista_mas = "lugares"
+        if st.button("🗺️\nZonas", use_container_width=True, type="primary" if st.session_state.vista_mas == "zonas" else "secondary"):
+            st.session_state.vista_mas = "zonas"
             st.rerun()
     with col_nav3:
-        if st.button("🏆 Top", use_container_width=True):
+        if st.button("📍\nLugares", use_container_width=True, type="primary" if st.session_state.vista_mas == "lugares" else "secondary"):
+            st.session_state.vista_mas = "lugares"
+            st.rerun()
+    with col_nav4:
+        if st.button("🏆\nTop", use_container_width=True, type="primary" if st.session_state.vista_mas == "top" else "secondary"):
             st.session_state.vista_mas = "top"
             st.rerun()
     
@@ -541,8 +651,64 @@ elif st.session_state.vista_principal == "mas":
             st.rerun()
         st.markdown("---")
     
+    # --- CLIENTES (TARJETAS) ---
+    if st.session_state.vista_mas == "clientes":
+        st.markdown("### 👥 Tarjetas de Clientes")
+        st.write("Gestiona la información de tus clientes: teléfono, comentarios y puntos de referencia.")
+        
+        busqueda_clientes = st.text_input("🔍 Buscar cliente:", placeholder="Nombre, teléfono o referencia...", key="busqueda_clientes")
+        clientes = get_lugares(busqueda_clientes)
+        
+        if not clientes:
+            st.info("No hay clientes registrados.")
+        else:
+            for cliente in clientes:
+                with st.container(border=True):
+                    st.markdown(f"**{cliente['nombre']}**")
+                    
+                    col_c1, col_c2 = st.columns(2)
+                    with col_c1:
+                        st.caption(f"🗺️ {cliente['zona_nombre'] or 'Sin zona'}")
+                        if cliente['telefono']:
+                            st.caption(f"📞 {cliente['telefono']}")
+                    with col_c2:
+                        st.caption(f"🔄 {cliente['visitas']} visitas")
+                        if cliente['ultima_visita']:
+                            st.caption(f"🕒 Última: {cliente['ultima_visita']}")
+                    
+                    if cliente['comentarios']:
+                        st.warning(f"📝 **Referencias:** {cliente['comentarios']}")
+                    
+                    # Mostrar direcciones
+                    direcciones = get_direcciones_lugar(cliente['id'])
+                    if direcciones:
+                        st.markdown("**📍 Direcciones:**")
+                        for dir_obj in direcciones:
+                            st.caption(f"  - {dir_obj['direccion']}")
+                    
+                    st.markdown("---")
+                    
+                    # Editar información
+                    with st.expander("✏️ Editar información"):
+                        telefono_edit = st.text_input("Teléfono:", value=cliente['telefono'] or "", key=f"tel_{cliente['id']}")
+                        comentarios_edit = st.text_area("Comentarios/Puntos de referencia:", 
+                            value=cliente['comentarios'] or "", 
+                            key=f"com_{cliente['id']}",
+                            placeholder="Ej: Casa azul, portón negro, timbrar 2 veces")
+                        
+                        if st.button("💾 Guardar cambios", key=f"guardar_{cliente['id']}", use_container_width=True):
+                            actualizar_lugar_info(cliente['id'], telefono_edit, comentarios_edit)
+                            st.success("Información actualizada.")
+                            st.rerun()
+                    
+                    # Eliminar cliente
+                    if st.button("🗑️ Eliminar cliente", key=f"del_cli_{cliente['id']}", use_container_width=True):
+                        eliminar_lugar(cliente['id'])
+                        st.success("Cliente eliminado.")
+                        st.rerun()
+    
     # --- ZONAS ---
-    if st.session_state.vista_mas == "zonas":
+    elif st.session_state.vista_mas == "zonas":
         st.markdown("### 🗺️ Zonas y Tarifas")
         with st.form("form_nueva_zona"):
             col_z1, col_z2 = st.columns(2)
@@ -578,16 +744,18 @@ elif st.session_state.vista_principal == "mas":
     
     # --- LUGARES ---
     elif st.session_state.vista_mas == "lugares":
-        st.markdown("### 📍 Lugares de Entrega")
+        st.markdown("### 📍 Gestión de Lugares")
         zonas = get_zonas()
         with st.form("form_nuevo_lugar"):
             nombre_lugar = st.text_input("Nombre del lugar:")
             zona_lugar = st.selectbox("Zona:", options=[z["nombre"] for z in zonas])
             direccion_lugar = st.text_input("Dirección inicial:")
+            telefono_lugar = st.text_input("📞 Teléfono (opcional):")
+            comentarios_lugar = st.text_area("📝 Comentarios (opcional):")
             if st.form_submit_button("➕ Agregar Lugar", use_container_width=True):
                 if nombre_lugar.strip() and direccion_lugar.strip():
                     zona_id = next((z["id"] for z in zonas if z["nombre"] == zona_lugar), None)
-                    if insertar_lugar(nombre_lugar, zona_id, direccion_lugar):
+                    if insertar_lugar(nombre_lugar, zona_id, direccion_lugar, telefono_lugar, comentarios_lugar):
                         st.success(f"✅ Lugar '{nombre_lugar}' agregado.")
                         st.rerun()
                     else:
@@ -602,6 +770,10 @@ elif st.session_state.vista_principal == "mas":
                 with st.container(border=True):
                     st.markdown(f"**{lugar['nombre']}**")
                     st.caption(f"🗺️ {lugar['zona_nombre'] or 'Sin zona'} | 🔄 {lugar['visitas']} visitas")
+                    if lugar['telefono']:
+                        st.caption(f"📞 {lugar['telefono']}")
+                    if lugar['comentarios']:
+                        st.caption(f"📝 {lugar['comentarios']}")
                     st.markdown("**Direcciones:**")
                     direcciones = get_direcciones_lugar(lugar["id"])
                     for dir_obj in direcciones:
@@ -641,8 +813,12 @@ elif st.session_state.vista_principal == "mas":
                 with st.container(border=True):
                     st.markdown(f"**#{idx + 1} {lugar['nombre']}**")
                     st.caption(f"🗺️ {lugar['zona_nombre'] or 'Sin zona'}")
+                    if lugar['telefono']:
+                        st.caption(f"📞 {lugar['telefono']}")
                     st.metric("Visitas", lugar["visitas"])
                     st.caption(f"Última: {lugar['ultima_visita'] or 'N/A'}")
+                    if lugar['comentarios']:
+                        st.caption(f"📝 {lugar['comentarios']}")
     
     # --- MENÚ ---
     else:
