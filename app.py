@@ -173,16 +173,122 @@ with st.form("registro_domicilio"):
         valor_final = valor_base
     
     # Propina
-    propina = st.number_input(
-        "🎁 Propina (opcional):",
-        min_value=0,
-        step=500,
-        value=0
+   # Propinas inteligentes con botones de porcentaje
+st.markdown("🎁 **Propina sugerida:**")
+
+# Crear 3 columnas para los botones de propina
+col_prop1, col_prop2, col_prop3 = st.columns(3)
+
+with col_prop1:
+    if st.button("10%"):
+        st.session_state.propina_calc = int(valor_final * 0.10)
+
+with col_prop2:
+    if st.button("15%"):
+        st.session_state.propina_calc = int(valor_final * 0.15)
+
+with col_prop3:
+    if st.button("20%"):
+        st.session_state.propina_calc = int(valor_final * 0.20)
+
+# Si no se ha calculado propina, iniciar en 0
+if "propina_calc" not in st.session_state:
+    st.session_state.propina_calc = 0
+
+# Mostrar la propina calculada y permitir editarla
+propina = st.number_input(
+    "💵 Valor de propina (puedes editar):",
+    min_value=0,
+    step=500,
+    value=st.session_state.propina_calc
+)
+
+# Resetear después de usar
+if boton_guardar:
+    st.session_state.propina_calc = 0
     )
     
     # Botón de guardar (IMPORTANTE: debe estar DENTRO del form)
     boton_guardar = st.form_submit_button("💾 Guardar Domicilio")
+# =============================================================================
+# FORMULARIO DE GASTOS RÁPIDOS
+# =============================================================================
+st.markdown("---")
+st.subheader("💸 Registrar Gasto Rápido")
 
+# Catálogo de gastos frecuentes
+GASTOS_FRECUENTES = {
+    "Gasolina": 15000,
+    "Almuerzo": 12000,
+    "Cena": 10000,
+    "Mantenimiento moto": 25000,
+    "Carga celular": 3000,
+    "Agua/Refresco": 2000,
+    "Parqueadero": 3000,
+    "Otro gasto": 0
+}
+
+with st.form("registro_gasto_rapido"):
+    # Selector de gasto frecuente
+    gasto_seleccionado = st.selectbox(
+        "¿Qué gasto registras?",
+        options=list(GASTOS_FRECUENTES.keys()),
+        index=0
+    )
+    
+    # Mostrar valor sugerido
+    valor_sugerido = GASTOS_FRECUENTES[gasto_seleccionado]
+    st.caption(f"💡 Valor típico: ${valor_sugerido:,}")
+    
+    # Si es "Otro gasto", permitir escribir el concepto
+    if gasto_seleccionado == "Otro gasto":
+        concepto_personalizado = st.text_input(
+            "Describe el gasto:",
+            placeholder="Ej: Repuesto, Multa, etc."
+        )
+        concepto_final = concepto_personalizado
+    else:
+        concepto_final = gasto_seleccionado
+    
+    # Valor del gasto (editable si es necesario)
+    valor_gasto = st.number_input(
+        "Valor del gasto:",
+        min_value=0,
+        step=500,
+        value=valor_sugerido if valor_sugerido > 0 else 0
+    )
+    
+    # Botón de guardar gasto
+    boton_guardar_gasto = st.form_submit_button("💾 Guardar Gasto")
+
+# =============================================================================
+# LÓGICA DE PROCESAMIENTO DE GASTOS
+# =============================================================================
+if boton_guardar_gasto:
+    if concepto_final.strip() == "":
+        st.error("️ Debes ingresar un concepto para el gasto.")
+    elif valor_gasto == 0:
+        st.error("⚠️ El valor del gasto no puede ser cero.")
+    else:
+        # Cargar datos existentes
+        datos = cargar_datos_web()
+        
+        # Crear el nuevo gasto
+        nuevo_gasto = {
+            "concepto": concepto_final,
+            "valor": int(valor_gasto),
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        
+        # Agregarlo a la lista
+        datos["gastos"].append(nuevo_gasto)
+        
+        # Guardar en el archivo
+        guardar_datos_web(datos)
+        
+        # Mensaje de éxito
+        st.success(f"✅ Gasto registrado: {concepto_final} - ${valor_gasto:,}")
+        st.balloons()
 # =============================================================================
 # LÓGICA DE PROCESAMIENTO (FUERA del form, pero usa la variable)
 # =============================================================================
