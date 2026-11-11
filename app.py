@@ -206,7 +206,7 @@ propina = st.number_input(
 # Resetear después de usar
 if boton_guardar:
     st.session_state.propina_calc = 0
-    )
+    
     
     # Botón de guardar (IMPORTANTE: debe estar DENTRO del form)
     boton_guardar = st.form_submit_button("💾 Guardar Domicilio")
