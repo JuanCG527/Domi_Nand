@@ -48,6 +48,92 @@ def guardar_datos_web(datos):
 # TÍTULO PRINCIPAL
 # =============================================================================
 st.title("🏍️ Sistema de Domicilios")
+# =============================================================================
+# DASHBOARD: RESUMEN DEL DÍA
+# =============================================================================
+# Cargamos los datos para mostrar estadísticas en tiempo real
+datos_actuales = cargar_datos_web()
+lista_domicilios = datos_actuales.get("domicilios", [])
+lista_gastos = datos_actuales.get("gastos", [])
+
+# Obtener la fecha de hoy en el mismo formato que guardamos
+hoy = datetime.now().strftime("%Y-%m-%d")
+
+# FILTRAR: Solo domicilios de hoy
+# (Agrupación: de todos los domicilios, sacamos solo los de hoy)
+domicilios_hoy = [
+    d for d in lista_domicilios 
+    if d.get("fecha", "").startswith(hoy)
+]
+
+# FILTRAR: Solo gastos de hoy
+gastos_hoy = [
+    g for g in lista_gastos 
+    if g.get("fecha", "").startswith(hoy)
+]
+
+# CALCULAR totales del día
+total_ingresos_hoy = sum(d["valor"] + d["propina"] for d in domicilios_hoy)
+total_gastos_hoy = sum(g["valor"] for g in gastos_hoy)
+balance_hoy = total_ingresos_hoy - total_gastos_hoy
+
+# CALCULAR totales generales (toda la historia)
+total_ingresos_general = sum(d["valor"] + d["propina"] for d in lista_domicilios)
+total_gastos_general = sum(g["valor"] for g in lista_gastos)
+balance_general = total_ingresos_general - total_gastos_general
+
+# =============================================================================
+# MOSTRAR EL DASHBOARD EN PANTALLA
+# =============================================================================
+# st.columns divide la pantalla en columnas (como una tabla)
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric(
+        label="📦 Domicilios Hoy",
+        value=len(domicilios_hoy),
+        delta=None
+    )
+
+with col2:
+    st.metric(
+        label="💰 Ingresos Hoy",
+        value=f"${total_ingresos_hoy:,}",
+        delta=None
+    )
+
+with col3:
+    st.metric(
+        label="💸 Gastos Hoy",
+        value=f"${total_gastos_hoy:,}",
+        delta=None
+    )
+
+with col4:
+    # El delta muestra si ganaste (+) o perdiste (-) con color automático
+    st.metric(
+        label="📊 Balance Hoy",
+        value=f"${balance_hoy:,}",
+        delta=f"${balance_hoy:,}" if balance_hoy != 0 else None
+    )
+
+# Separador visual
+st.markdown("---")
+
+# Resumen general (toda la historia)
+with st.expander("📈 Ver resumen histórico completo"):
+    col_hist1, col_hist2, col_hist3 = st.columns(3)
+    with col_hist1:
+        st.info(f"**Total histórico de ingresos:**\n${total_ingresos_general:,}")
+    with col_hist2:
+        st.warning(f"**Total histórico de gastos:**\n${total_gastos_general:,}")
+    with col_hist3:
+        if balance_general > 0:
+            st.success(f"**Ganancia neta total:**\n${balance_general:,}")
+        elif balance_general < 0:
+            st.error(f"**Pérdida neta total:**\n${abs(balance_general):,}")
+        else:
+            st.info("**Balance en cero**")
 st.markdown("---")
 
 # =============================================================================
